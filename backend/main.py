@@ -3,12 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import joblib
-import numpy as np
-from lightgbm import Booster
+import logging
+import sys
 
 app = FastAPI(title="Smart Health Predictor API")
 
-# Allow frontend
+# Allow only your deployed frontend
 origins = ["https://healthpredictorfrontend.onrender.com"]
 
 app.add_middleware(
@@ -19,16 +19,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load model safely
-model = joblib.load("model/lgbm_pipeline.pkl")
-
-# Handle both sklearn wrapper and raw Booster
-is_booster = isinstance(model, Booster)
-
 ALL_FEATURES = [
-    "age", "sex", "trestbps", "chol", "thalach", "oldpeak",
-    "cp", "fbs", "restecg", "exang", "slope", "ca", "thal"
+    "age","sex","trestbps","chol","thalach","oldpeak",
+    "cp","fbs","restecg","exang","slope","ca","thal"
 ]
+
+# Logging setup
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+logger = logging.getLogger("uvicorn.error")
+
+# Safe model loading
+try:
+    model = joblib.load("model/lgbm_pipeline.pkl")
+    logger.info("✅ Model loaded successfully.")
+except Exception as e:
+    logger.error(f"❌ Failed to load model: {e}")
+    model = None  # Fallback to avoid crashing
+
 
 class PatientData(BaseModel):
     age: float
@@ -45,25 +52,21 @@ class PatientData(BaseModel):
     ca: int
     thal: int
 
+
 @app.get("/")
 def root():
     return {"message": "Smart Health Predictor API is running!"}
 
+
 @app.post("/predict")
 def predict(data: PatientData):
+    if model is None:
+        return {"error": "Model not loaded. Check server logs."}
+
     try:
-        # Convert input into dataframe
-        input_dict = data.dict()
-        df = pd.DataFrame([input_dict])[ALL_FEATURES]
+        df = pd.DataFrame([data.dict()])[ALL_FEATURES]
 
-        if is_booster:
-            # Raw Booster requires numpy array
-            dmatrix = df.values
-            prob = model.predict(dmatrix)[0]
-        else:
-            # Sklearn wrapper
-            prob = model.predict_proba(df)[:, 1][0]
-
+        prob = model.predict_proba(df)[:, 1][0]
         health_score = round(prob * 100, 2)
 
         if prob < 0.2:
@@ -79,4 +82,5 @@ def predict(data: PatientData):
         }
 
     except Exception as e:
+        logger.error(f"❌ Prediction failed: {e}")
         return {"error": str(e)}
