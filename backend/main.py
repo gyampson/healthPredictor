@@ -3,9 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import joblib
+import numpy as np
+from lightgbm import Booster
 
 app = FastAPI(title="Smart Health Predictor API")
 
+# Allow frontend
 origins = ["https://healthpredictorfrontend.onrender.com"]
 
 app.add_middleware(
@@ -16,11 +19,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load pipeline
+# Load model safely
 model = joblib.load("model/lgbm_pipeline.pkl")
 
-ALL_FEATURES = ["age","sex","trestbps","chol","thalach","oldpeak",
-                "cp","fbs","restecg","exang","slope","ca","thal"]
+# Handle both sklearn wrapper and raw Booster
+is_booster = isinstance(model, Booster)
+
+ALL_FEATURES = [
+    "age", "sex", "trestbps", "chol", "thalach", "oldpeak",
+    "cp", "fbs", "restecg", "exang", "slope", "ca", "thal"
+]
 
 class PatientData(BaseModel):
     age: float
@@ -44,11 +52,18 @@ def root():
 @app.post("/predict")
 def predict(data: PatientData):
     try:
-        # Convert input to DataFrame
+        # Convert input into dataframe
         input_dict = data.dict()
         df = pd.DataFrame([input_dict])[ALL_FEATURES]
 
-        prob = model.predict_proba(df)[:,1][0]
+        if is_booster:
+            # Raw Booster requires numpy array
+            dmatrix = df.values
+            prob = model.predict(dmatrix)[0]
+        else:
+            # Sklearn wrapper
+            prob = model.predict_proba(df)[:, 1][0]
+
         health_score = round(prob * 100, 2)
 
         if prob < 0.2:
