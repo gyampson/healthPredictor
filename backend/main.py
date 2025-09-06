@@ -6,7 +6,7 @@ import joblib
 
 app = FastAPI(title="Smart Health Predictor API")
 
-origins = ["http://localhost:5173"]
+origins = ["https://healthpredictorfrontend.onrender.com"]
 
 app.add_middleware(
     CORSMiddleware,
